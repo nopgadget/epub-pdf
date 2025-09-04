@@ -10,8 +10,6 @@ import argparse
 import os
 import sys
 from pathlib import Path
-import io
-from html.parser import HTMLParser
 import base64
 import tempfile
 
@@ -59,26 +57,6 @@ def check_dependencies():
     
     return True
 
-class HTMLStripper(HTMLParser):
-    """Simple HTML tag stripper to extract text content."""
-    def __init__(self):
-        super().__init__()
-        self.reset()
-        self.strict = False
-        self.convert_charrefs = True
-        self.text = io.StringIO()
-
-    def handle_data(self, data):
-        self.text.write(data)
-
-    def get_data(self):
-        return self.text.getvalue()
-
-def strip_html_tags(html_content):
-    """Remove HTML tags and return plain text."""
-    stripper = HTMLStripper()
-    stripper.feed(html_content)
-    return stripper.get_data()
 
 def validate_input_file(input_path):
     """Validate that the input file exists and is an EPUB."""
@@ -141,9 +119,9 @@ def convert_html_to_pdf_content(html_content, image_map, temp_dir, verbose=False
             print("BeautifulSoup not available, falling back to basic parsing")
         return html_content
 
-def convert_epub_to_pdf_enhanced(input_path, output_path=None, verbose=False):
+def convert_epub_to_pdf_main(input_path, output_path=None, verbose=False):
     """
-    Enhanced EPUB to PDF conversion preserving images and formatting.
+    Convert EPUB to PDF preserving images and formatting.
     """
     try:
         import weasyprint
@@ -157,7 +135,7 @@ def convert_epub_to_pdf_enhanced(input_path, output_path=None, verbose=False):
         if not output_path:
             output_path = generate_output_path(input_path)
         
-        print(f"Converting {input_path} to {output_path} (Enhanced mode)...")
+        print(f"Converting {input_path} to {output_path}...")
         
         # Read the EPUB file
         if verbose:
@@ -239,7 +217,7 @@ def convert_epub_to_pdf_enhanced(input_path, output_path=None, verbose=False):
             # Analyze the result
             if os.path.exists(output_path):
                 file_size = os.path.getsize(output_path)
-                print(f"✅ Enhanced conversion successful!")
+                print(f"✅ Conversion successful!")
                 print(f"📄 Output: {output_path}")
                 print(f"📊 File size: {file_size:,} bytes ({file_size/1024/1024:.2f} MB)")
                 print(f"📷 Images preserved: {len(image_map)}")
@@ -261,148 +239,10 @@ def convert_epub_to_pdf_enhanced(input_path, output_path=None, verbose=False):
             return True
             
     except ImportError as e:
-        if verbose:
-            print(f"Enhanced mode not available: {str(e)}")
-        print("🔄 Falling back to basic conversion...")
-        return convert_epub_to_pdf_basic(input_path, output_path, verbose)
-    except Exception as e:
-        print(f"❌ Error during enhanced conversion: {str(e)}")
-        if verbose:
-            import traceback
-            traceback.print_exc()
-        print("🔄 Trying basic conversion...")
-        return convert_epub_to_pdf_basic(input_path, output_path, verbose)
-
-def convert_epub_to_pdf_basic(input_path, output_path=None, verbose=False):
-    """
-    Convert EPUB to PDF using ebooklib and reportlab.
-    
-    Args:
-        input_path (str): Path to the input EPUB file
-        output_path (str, optional): Path to the output PDF file
-        verbose (bool): Enable verbose output
-    """
-    try:
-        import ebooklib
-        from ebooklib import epub
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.pagesizes import letter
-        from reportlab.lib.units import inch
-        
-        # Validate input
-        validate_input_file(input_path)
-        
-        # Generate output path if not provided
-        if not output_path:
-            output_path = generate_output_path(input_path)
-        
-        print(f"Converting {input_path} to {output_path}...")
-        
-        # Read the EPUB file
-        if verbose:
-            print("📖 Reading EPUB file...")
-        book = epub.read_epub(input_path)
-        
-        # Create PDF document
-        doc = SimpleDocTemplate(output_path, pagesize=letter,
-                              rightMargin=0.75*inch, leftMargin=0.75*inch,
-                              topMargin=1*inch, bottomMargin=1*inch)
-        
-        # Get styles
-        styles = getSampleStyleSheet()
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=16,
-            spaceAfter=30,
-        )
-        normal_style = styles['Normal']
-        
-        # Story to hold all content
-        story = []
-        
-        # Add title if available
-        title = book.get_metadata('DC', 'title')
-        if title:
-            story.append(Paragraph(title[0][0], title_style))
-            story.append(Spacer(1, 20))
-        
-        # Add author if available
-        author = book.get_metadata('DC', 'creator')
-        if author:
-            story.append(Paragraph(f"By: {author[0][0]}", normal_style))
-            story.append(Spacer(1, 20))
-        
-        page_count = 0
-        
-        # Process each item in the EPUB
-        for item in book.get_items():
-            if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                if verbose:
-                    print(f"Processing: {item.get_name()}")
-                
-                # Get content and decode
-                content = item.get_content().decode('utf-8')
-                
-                # Strip HTML tags to get plain text
-                text_content = strip_html_tags(content)
-                
-                # Clean up the text
-                text_content = text_content.strip()
-                
-                if text_content:  # Only add non-empty content
-                    # Split into paragraphs
-                    paragraphs = text_content.split('\n')
-                    
-                    for para in paragraphs:
-                        para = para.strip()
-                        if para:  # Skip empty paragraphs
-                            try:
-                                story.append(Paragraph(para, normal_style))
-                                story.append(Spacer(1, 12))
-                            except Exception as e:
-                                if verbose:
-                                    print(f"⚠️  Skipping problematic paragraph: {str(e)}")
-                                # Add as plain text if Paragraph fails
-                                story.append(Spacer(1, 12))
-                    
-                    # Add page break between chapters/sections
-                    story.append(PageBreak())
-                    page_count += 1
-        
-        if not story or page_count == 0:
-            raise Exception("No readable content found in the EPUB file")
-        
-        # Build the PDF
-        if verbose:
-            print("📄 Building PDF...")
-        doc.build(story)
-        
-        # Analyze the result
-        if os.path.exists(output_path):
-            file_size = os.path.getsize(output_path)
-            print(f"✅ Conversion successful!")
-            print(f"📄 Output: {output_path}")
-            print(f"📊 File size: {file_size:,} bytes ({file_size/1024/1024:.2f} MB)")
-            print(f"📖 Processed {page_count} sections")
-            
-            # Try to get actual page count if pikepdf is available
-            try:
-                import pikepdf
-                pdf = pikepdf.open(output_path)
-                actual_pages = len(pdf.pages)
-                print(f"📑 PDF pages: {actual_pages}")
-                pdf.close()
-            except ImportError:
-                if verbose:
-                    print("ℹ️  Install pikepdf to get actual page count")
-            except Exception as e:
-                if verbose:
-                    print(f"⚠️  Could not analyze PDF: {str(e)}")
-        
-        return True
-        
+        print(f"❌ Conversion failed - missing dependencies: {str(e)}")
+        print("Please install missing dependencies with:")
+        print("pip install beautifulsoup4 weasyprint")
+        return False
     except Exception as e:
         print(f"❌ Error during conversion: {str(e)}")
         if verbose:
@@ -410,23 +250,29 @@ def convert_epub_to_pdf_basic(input_path, output_path=None, verbose=False):
             traceback.print_exc()
         return False
 
+
 def convert_epub_to_pdf(input_path, output_path=None, verbose=False):
     """
-    Main conversion function - tries enhanced mode first, falls back to basic.
+    Convert EPUB to PDF with image and formatting preservation.
     """
-    # Try enhanced conversion first (with images and formatting)
-    return convert_epub_to_pdf_enhanced(input_path, output_path, verbose)
+    return convert_epub_to_pdf_main(input_path, output_path, verbose)
 
 def main():
     """Main function to handle command-line interface."""
     parser = argparse.ArgumentParser(
-        description="Simple EPUB to PDF converter using ebooklib and reportlab",
+        description="EPUB to PDF converter preserving images, formatting, and text sizes",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python simple_converter.py book.epub
-  python simple_converter.py book.epub -o output.pdf
-  python simple_converter.py book.epub -v
+  python main.py book.epub
+  python main.py book.epub -o output.pdf
+  python main.py book.epub -v
+
+Features:
+  - Preserves original formatting and text sizes
+  - Embeds images from EPUB files
+  - Maintains HTML structure and CSS styling
+  - Creates searchable, AI-readable PDFs
 
 Based on: https://github.com/AlenSarangSatheesh/epub_to_pdf_Converter
         """
