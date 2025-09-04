@@ -1,0 +1,14 @@
+# EPUB to PDF Converter Dependencies
+# Based on the epub2pdf package requirements
+
+# Main conversion library
+epub2pdf>=0.1.0
+
+# Core dependencies (these are automatically installed with epub2pdf but listed for reference)
+img2pdf>=0.4.0
+pikepdf>=5.0.0
+lxml>=4.6.0
+mobi>=0.3.0
+
+# Additional useful libraries for enhanced functionality
+pathlib2>=2.3.0; python_version<"3.4"
